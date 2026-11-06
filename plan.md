@@ -78,7 +78,7 @@ The goal is that after this project the student can sit in front of a peer evalu
 ## Global step plan
 
 A. **Scaffolding** — ✅ DONE. Modules: `fixme-core` (no `common`), `fixme-router`, `fixme-broker`, `fixme-market`. `mvn clean package` gives a runnable jar per component.
-B. **Shared message protocol** — define the FIX-style message format (fields, checksum, message boundaries) that Router/Broker/Market will all use to talk to each other.
+B. **Shared message protocol** — agree the wire format and implement shared message parsing/formatting and checksum validation in `fixme-core`.
 C. **Shared networking layer** — non-blocking socket handling + executor-based message processing, built once and reused by all three components.
 D. **Router** — accept Broker connections (port 5000) and Market connections (port 5001), assign unique 6-digit IDs, maintain a routing table, implement the validate → lookup → forward pipeline.
 E. **Market** — instrument book + order execution rules (must at least reject unknown instruments, and reject Buy orders when quantity is unavailable).
@@ -88,11 +88,25 @@ H. **Bonus** (only once mandatory is fully working — subject: bonus isn't grad
 
 (E and F don't depend on each other, but both need C and D to exist first.)
 
-**Decisions to make when you actually reach them (not upfront):**
+### Message protocol: confirmed choices and open decisions
 
-1. How to implement "non-blocking sockets" in practice, and how that pairs with the executor framework for message handling.
-2. How to frame messages on the wire, so a receiver knows where one message ends and the next begins (TCP is just a byte stream — no built-in message boundaries).
-3. Exact field set for messages beyond what the subject mandates (e.g. what Executed/Rejected need to carry so they can be routed back to the right Broker).
-4. How Broker produces orders (manual input, generator, script...).
-5. What Router does on an invalid checksum or unknown destination.
-6. Whether to use any external libraries for the networking/protocol core, or stick to plain Java.
+- **Subject requirements:** messages start with the router-assigned ID and end with a checksum. Buy/Sell orders include Instrument, Quantity, Market, and Price.
+- **Choices reflected in the current `FixTag` draft:**
+  - Use a small, project-defined FIX-style subset rather than implement the full FIX standard.
+  - `49` `SENDER_ID` and `56` `TARGET_ID` identify the sending and receiving components. In this project they carry router-assigned IDs.
+  - `5001` `FIXME_TYPE` and `5002` `MARKET` are project-specific tags; `FIXME_TYPE` carries `BUY`, `SELL`, `EXECUTED`, or `REJECTED`.
+  - `55` `INSTRUMENT`, `38` `QUANTITY`, `5002` `MARKET`, and `44` `PRICE` carry the required order fields. Price is an integer by project decision.
+  - `37` `BROKER_ORDER_ID` correlates a reply with its original order.
+  - `10` `CHECKSUM` is the final field.
+- The custom tag numbers are part of the project's own protocol; the other numbers are existing FIX tag numbers. The protocol is simplified and is not claimed to be fully FIX-compliant.
+- **Not decided yet:** whether to represent messages with one shared `FixMessage` or separate Broker/Market types, and whether `FixMessage` should hold parsed fields or raw content. The existing record is only the current code, not a confirmed design choice.
+
+### Next steps
+
+1. **Your next protocol decisions:** choose the field separator/message boundary and define exactly which bytes the checksum covers and how it is calculated/formatted. Then write one example order and one reply; ensure the reply can identify the original order and target Broker.
+2. Decide the message representation (shared or component-specific, parsed fields or raw content) before implementing the codec.
+3. Implement and test the shared protocol in `fixme-core`: encode/decode fields and verify checksum handling with a known example. Decide how to handle malformed, duplicate, or missing fields as part of this step.
+4. Then decide how to implement non-blocking sockets and pair them with executor-based message handling.
+5. Define Router behavior for invalid checksums, unknown destinations, and disconnects before end-to-end testing.
+6. Decide how the Broker produces orders (manual input, generator, or script) when implementing the Broker.
+7. Consider external libraries only if a concrete need arises; plain Java remains an option.
